@@ -1,0 +1,38 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local recovery copies
+.brightloop-git-recovery/
+.migration_step.py
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+
+# Build and test output
+dist/
+build/
+coverage/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/e2e/out/
+
+# Local data
+data/*.db
+data/*.db-*
+data/outbox.log
+data/.secret_key
+
+# OS files
+.DS_Store
+Thumbs.db
