@@ -1,5 +1,6 @@
 data/*.db
 data/*.db-*
+**/data/*.db
 data/outbox.log
 __pycache__/
 *.pyc
