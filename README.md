@@ -4,7 +4,7 @@ One platform for plans, subscriptions, invoicing, payments and revenue reporting
 (Odoo × FLUX Lucknow Hackathon '26 – *Subscription Management System*).
 
 **Stack:** Python 3 + Flask · SQLite (local, offline-friendly) · vanilla ES-module SPA (no build step, no CDN).
-Only one dependency: `Flask`.
+Dependencies: `Flask` and `python-dotenv` (loads local `.env` settings; SMTP itself uses Python's standard library).
 
 ## Run it
 
@@ -17,6 +17,13 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python run.py                      # http://localhost:5000
 ```
+For real password-reset delivery, copy `.env.example` to `.env`, set `MAIL_MODE=smtp`, and enter your provider's
+SMTP host/port, username, app password, verified `MAIL_FROM`, and the reachable `FRONTEND_URL`. Keep `.env` private;
+it is ignored by Git. Startup validates SMTP settings instead of silently dropping back to the development outbox.
+Leave `MAIL_MODE=console` for an offline demo; the reset page then exposes a development link and writes mail to
+`data/outbox.log`. For local Windows development, run `Copy-Item .env.example .env` in PowerShell and edit `.env`.
+For Docker, set `FRONTEND_URL` to the published address (for example `http://localhost:8000`) so reset links open the
+right app URL.
 In VS Code: **File → Open Folder → brightloop**, accept the recommended extensions, pick the `.venv` interpreter
 (*Python: Select Interpreter*), then press **F5** (*Brightloop: run server*). **Terminal → Run Task…** has
 *Setup*, *Run server*, *Run tests*, *Run billing job* and *Docker: up*. The Testing sidebar discovers the unit tests automatically.
@@ -42,12 +49,15 @@ First start creates the database and loads demo data.
 | Customer (portal) | customer@example.com | Customer@123 |
 
 ```bash
-python -m unittest discover -s tests -v   # 12 tests: rules, permissions, billing idempotency, payments, CLI persistence, lifecycle, profile/password/contact
+python -m unittest discover -s tests -v   # 15 tests: rules, permissions, billing idempotency, payments, CLI persistence, lifecycle, SMTP reset, customer self-service
 python run.py billing                     # the daily billing job (put in cron / Task Scheduler)
 python run.py bulk 5000                   # load-test data: 5,000 subscriptions + 15,000 invoices
 ```
 Forgot-password: with `MAIL_MODE=console` (default) the email is written to `data/outbox.log` and the reset link is
-also shown on screen for demos. Set `MAIL_MODE=smtp` + `SMTP_*` (see `.env.example`) for real email.
+also shown on screen for demos. Set `MAIL_MODE=smtp` + `SMTP_*` (see `.env.example`) for real email. Customers can
+view their own subscriptions and invoices, update billing details, change their password, and pause, resume, renew
+or close subscriptions only when the relevant plan rules allow the action. An expired, closed subscription can be
+renewed when its plan permits renewal.
 
 ## The website and the app
 
@@ -74,12 +84,13 @@ All colours are CSS variables at the top of `frontend/css/app.css`.
 | Requirement | Implementation |
 |---|---|
 | Sign-up: unique email, password >8 chars with upper/lower/special | `services/auth.py`, `security.password_error`, UNIQUE+NOCASE on `users.email`; live checklist in `pages/auth.js` |
-| Reset link to registered email | signed, 1-hour, single-use token (`forgot_password` / `reset_password`) |
+| Reset link to registered email | signed, 1-hour, single-use token (`forgot_password` / `reset_password`); SMTP delivery configurable with `.env` |
 | Roles: admin / staff / customer portal; only admin adds staff | `security.auth_required(*roles)` on every route; `POST /api/users` admin-only; portal queries scoped to own `customer_id` |
 | Product: name, type, sales/cost price, notes, variants (Odoo brand +560) | `products` + `product_variants` (seeded: *Brand: Odoo +560*) |
 | Plan: price, daily/weekly/monthly/yearly, min qty, availability dates; auto-close / early close / pause / renew per plan | `plans` flags: `auto_close, allow_early_close, allow_pause, allow_renew`, enforced in `services/subscriptions.py` |
 | Quotation templates with validity days | `quotation_templates` (+lines); validity stamped as `quote_valid_until`, enforced on Confirm |
 | Subscription: number, customer, plan, start/expiry, payment terms, lines; Draft→Quotation→Confirmed→Active→Closed | `subscriptions`, action endpoints, stepper on the detail page |
+| Customer self-service: own invoices/subscriptions and plan-governed pause, resume, renew, close | customer-scoped routes; renewal can reopen an expired subscription only when its plan allows it |
 | Invoices auto-created from subscriptions, taxes automatic, confirm/cancel/send/print, Draft→Confirmed→Paid | `services/billing.py`; `UNIQUE(subscription_id, period_start)` = never billed twice; catch-up loop = never skipped |
 | Discounts: admin-only, fixed/percent, min purchase/qty, dates, usage limit, per product or whole subscription, auto on next invoice | `catalog.eligible_discounts` + `domain/pricing.compute`; usage counted, restored if a draft invoice is cancelled |
 | Payments: method, amount, date, note, against invoice; paid vs outstanding | `record_payment` (no over-payment, confirmed invoices only, auto-marks Paid) |

@@ -1,5 +1,6 @@
 import os, tempfile, unittest
 from datetime import date, timedelta
+from unittest.mock import MagicMock, patch
 from app import create_app
 from app.domain.pricing import advance, compute
 from app.security import password_error
@@ -25,6 +26,11 @@ class PricingTests(unittest.TestCase):
         self.assertEqual((r["subtotal"], r["discount_total"], r["tax_total"], r["total"]), (1000, 100, 162, 1062))
         d[0]["min_quantity"] = 11   # not eligible
         self.assertEqual(compute(lines, d)["discount_total"], 0)
+
+    def test_smtp_configuration_fails_fast_when_incomplete(self):
+        with self.assertRaisesRegex(RuntimeError, "SMTP_HOST"):
+            create_app({"MAIL_MODE": "smtp", "SMTP_HOST": "", "MAIL_FROM": "billing@example.com",
+                        "FRONTEND_URL": "https://brightloop.example"})
 
 
 class ApiTests(unittest.TestCase):
@@ -54,6 +60,28 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(self.c.post("/api/auth/reset-password", json={"token": token, "password": "Third#Pass3"}).status_code, 400)  # single use
         self.login("t@x.com", "Another#Pass2")
+
+    def test_smtp_reset_sends_mail_without_exposing_dev_link(self):
+        keys = ("MAIL_MODE", "MAIL_FROM", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "FRONTEND_URL")
+        previous = {key: self.app.config[key] for key in keys}
+        self.app.config.update(MAIL_MODE="smtp", MAIL_FROM="billing@brightloop.test", SMTP_HOST="smtp.test",
+                               SMTP_PORT=587, SMTP_USER="mailer", SMTP_PASSWORD="secret",
+                               FRONTEND_URL="https://brightloop.test")
+        smtp = MagicMock()
+        smtp.__enter__.return_value = smtp
+        try:
+            with patch("app.services.mailer.smtplib.SMTP", return_value=smtp) as connect:
+                r = self.c.post("/api/auth/forgot-password", json={"email": "admin@brightloop.com"})
+            self.assertEqual(r.status_code, 200)
+            self.assertNotIn("dev_reset_link", r.get_json())
+            connect.assert_called_once_with("smtp.test", 587, timeout=15)
+            smtp.starttls.assert_called_once()
+            smtp.login.assert_called_once_with("mailer", "secret")
+            message = smtp.send_message.call_args.args[0]
+            self.assertEqual(message["To"], "admin@brightloop.com")
+            self.assertIn("https://brightloop.test/#/reset?token=", message.get_content())
+        finally:
+            self.app.config.update(previous)
 
     def test_profile_password_and_contact(self):
         h = self.login("staff@brightloop.com", "Staff@12345")
@@ -123,6 +151,50 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.c.post(f"/api/subscriptions/{s['id']}/actions/confirm", headers=h).status_code, 409)   # cannot skip/repeat steps
         bad = dict(body, lines=[{"product_id": 1, "quantity": 0}])
         self.assertEqual(self.c.post("/api/subscriptions", json=bad, headers=h).status_code, 422)
+
+    def test_customer_can_renew_expired_subscription_when_plan_allows_it(self):
+        admin = self.admin()
+        customer = self.login("customer@example.com", "Customer@123")
+        account = self.c.get("/api/me/account", headers=customer).get_json()
+        customer_id = account["customer"]["id"]
+        templates = self.c.get("/api/templates?per_page=100", headers=admin).get_json()["items"]
+        plans = self.c.get("/api/plans?per_page=100", headers=admin).get_json()["items"]
+        plan = next(p for p in plans if p["billing_period"] == "monthly" and p["allow_renew"])
+        template = next(t for t in templates if t["plan_id"] == plan["id"])
+        today = date.today()
+        body = {"customer_id": customer_id, "template_id": template["id"],
+                "start_date": today.isoformat(), "expiry_date": (today + timedelta(days=30)).isoformat()}
+        sub = self.c.post("/api/subscriptions", json=body, headers=admin).get_json()
+        for action in ("send", "confirm", "activate"):
+            self.c.post(f"/api/subscriptions/{sub['id']}/actions/{action}", headers=admin)
+        before = date.fromisoformat(sub["expiry_date"])
+        term = (before - today).days
+        expired = today - timedelta(days=1)
+        from app.db import commit, execute
+        with self.app.app_context():
+            execute("UPDATE subscriptions SET start_date=?,expiry_date=?,status='closed',closed_at=? WHERE id=?",
+                    ((expired - timedelta(days=term)).isoformat(), expired.isoformat(), expired.isoformat(), sub["id"]))
+            commit()
+        detail = self.c.get(f"/api/subscriptions/{sub['id']}", headers=customer).get_json()
+        self.assertTrue(detail["can_renew"])
+        renewed = self.c.post(f"/api/subscriptions/{sub['id']}/actions/renew", headers=customer)
+        self.assertEqual(renewed.status_code, 200, renewed.get_json())
+        result = renewed.get_json()
+        self.assertEqual(result["status"], "active")
+        self.assertEqual(result["expiry_date"], (expired + timedelta(days=term)).isoformat())
+        self.assertIsNone(result["closed_at"])
+
+        no_renew_plan = next(p for p in plans if not p["allow_renew"])
+        product = self.c.get("/api/products?per_page=1", headers=admin).get_json()["items"][0]
+        blocked_body = {"customer_id": customer_id, "plan_id": no_renew_plan["id"],
+                        "start_date": today.isoformat(), "expiry_date": (today + timedelta(days=30)).isoformat(),
+                        "lines": [{"product_id": product["id"], "quantity": no_renew_plan["min_quantity"]}]}
+        blocked = self.c.post("/api/subscriptions", json=blocked_body, headers=admin).get_json()
+        for action in ("send", "confirm", "activate"):
+            self.c.post(f"/api/subscriptions/{blocked['id']}/actions/{action}", headers=admin)
+        blocked_detail = self.c.get(f"/api/subscriptions/{blocked['id']}", headers=customer).get_json()
+        self.assertFalse(blocked_detail["can_renew"])
+        self.assertEqual(self.c.post(f"/api/subscriptions/{blocked['id']}/actions/renew", headers=customer).status_code, 409)
 
     def test_partial_payments_settle_exactly(self):
         h = self.admin()

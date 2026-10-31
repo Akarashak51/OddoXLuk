@@ -104,8 +104,8 @@ export async function subscriptionDetail(root, { params, user }) {
       if (s.status === 'draft') acts.push(['send', 'Send quotation', 'primary']);
       if (s.status === 'quotation') acts.push(['confirm', 'Confirm', 'primary']);
       if (s.status === 'confirmed') acts.push(['activate', 'Activate', 'primary']);
-      if (live && s.allow_renew) acts.push(['renew', 'Renew']);
     }
+    if (s.can_renew) acts.push(['renew', isC ? 'Renew subscription' : 'Renew']);
     if (live && s.allow_pause && !s.paused) acts.push(['pause', 'Pause']);
     if (live && s.paused) acts.push(['resume', 'Resume', 'primary']);
     if (s.status !== 'closed' && (isC ? (live && s.allow_early_close) : true)) acts.push(['close', 'Close', 'danger']);
@@ -125,9 +125,11 @@ export async function subscriptionDetail(root, { params, user }) {
   }
   root.onclick = async e => {
     const b = e.target.closest('[data-act]'); if (!b) return;
-    const a = b.dataset.act, msg = { close: 'Close this subscription? Billing stops and this cannot be undone.', pause: 'Pause billing until you resume?', renew: 'Extend the expiry date by another term?' }[a];
+    const a = b.dataset.act, msg = { close: 'Close this subscription? Billing stops and this cannot be undone.', pause: 'Pause billing until you resume?', renew: 'Renew this subscription for one more term?' }[a];
     if (msg && !(await confirmBox(msg, a[0].toUpperCase() + a.slice(1), a === 'close'))) return;
-    try { await api.post(`/subscriptions/${id}/actions/${a}`); toast('Done'); load(); } catch (err) { toast(err.message, 'err'); }
+    b.disabled = true;
+    try { await api.post(`/subscriptions/${id}/actions/${a}`); toast(a === 'renew' ? 'Subscription renewed' : 'Done'); load(); }
+    catch (err) { toast(err.message, 'err'); b.disabled = false; }
   };
   await load();
 }

@@ -6,7 +6,7 @@ from ..domain.pricing import TERMS, advance, compute, parse, r2
 from ..errors import ApiError
 from ..validators import Validator
 
-CUSTOMER_ACTIONS = {"pause", "resume", "close"}
+CUSTOMER_ACTIONS = {"pause", "resume", "renew", "close"}
 
 
 def _fail(field, msg):
@@ -121,6 +121,9 @@ def get(id_, customer_id=None):
     row["lines"] = lines
     row["totals"] = {k: v for k, v in compute([dict(l, tax_rate=l["tax_rate"] or 0) for l in lines], []).items() if k in ("subtotal", "tax_total", "total")}
     row["expired"] = bool(row["status"] == "active" and row["expiry_date"] < date.today().isoformat())
+    row["can_renew"] = bool(row["allow_renew"] and (
+        row["status"] == "active" or (row["status"] == "closed" and row["expiry_date"] < date.today().isoformat())
+    ))
     return row
 
 
@@ -183,12 +186,16 @@ def _resume(s, p):
 
 
 def _renew(s, p):
-    if s["status"] != "active":
-        raise ApiError("Only an active subscription can be renewed", 409)
     if not p["allow_renew"]:
         raise ApiError("This plan does not allow renewal", 409)
+    reopening = s["status"] == "closed" and s["expiry_date"] < date.today().isoformat()
+    if s["status"] != "active" and not reopening:
+        raise ApiError("Only an active or expired subscription can be renewed", 409)
     term = max(1, (parse(s["expiry_date"]) - parse(s["start_date"])).days)
-    return {"expiry_date": (parse(s["expiry_date"]) + timedelta(days=term)).isoformat()}
+    changes = {"expiry_date": (parse(s["expiry_date"]) + timedelta(days=term)).isoformat()}
+    if reopening:
+        changes.update(status="active", paused=0, closed_at=None)
+    return changes
 
 
 def _close(s, p):
