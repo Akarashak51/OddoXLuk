@@ -7,6 +7,10 @@
 import os
 import sys
 
+from dotenv import load_dotenv
+
+load_dotenv()  # Load local .env before app configuration is imported.
+
 from app import create_app
 from app.db import commit
 

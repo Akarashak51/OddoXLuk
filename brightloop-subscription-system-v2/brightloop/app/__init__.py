@@ -9,6 +9,8 @@ def create_app(overrides=None):
     app = Flask(__name__, static_folder=os.path.join(Config.BASE, "frontend"), static_url_path="")
     app.config.from_object(Config)
     app.config.update(overrides or {})
+    from .services.mailer import validate_mail_config
+    validate_mail_config(app.config)
     db.init_app(app)
     register_errors(app)
     from .routes import register_routes

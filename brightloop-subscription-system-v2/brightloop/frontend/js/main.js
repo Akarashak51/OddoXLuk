@@ -58,7 +58,7 @@ const homeFor = u => u.role === 'customer' ? '/subscriptions' : '/dashboard';
 function shell(user) {
   const groups = (user.role === 'customer' ? NAV.customer : NAV.internal).filter(g => !g[2] || g[2] === user.role);
   setHTML(app, html`<div class="app"><header class="appbar"><div class="appbar-row">
-      <a class="brand" href="#${homeFor(user)}">${raw(LOGO)}Brightloop</a><div class="grow"></div>${themeBtn}
+      <a class="brand" href="#/" aria-label="Brightloop home">${raw(LOGO)}Brightloop</a><div class="grow"></div>${themeBtn}
       <div class="usermenu"><button type="button" id="um" aria-haspopup="true" aria-expanded="false" aria-label="Account menu"><span class="avatar" data-who-avatar>${user.name[0].toUpperCase()}</span>
         <span class="who-t"><b data-who-name>${user.name}</b><span>${user.role}</span></span>${raw(icon('down', 16))}</button>
         <div class="menu" id="menu" role="menu"><a href="#/profile" role="menuitem">${raw(icon('user', 17))} My profile</a><a href="#/contact" role="menuitem">${raw(icon('help', 17))} Help &amp; contact</a><a href="#/security" role="menuitem">${raw(icon('shield', 17))} Security</a><hr>
@@ -86,7 +86,6 @@ async function render() {
   if (authPage) { mounted = ''; return authPage(app, ctx); }
 
   const home = session.user && homeFor(session.user);
-  if (path === '/' && session.user) return go(home);
   const publicPage = PUBLIC[path];
   if (publicPage) {
     if (publicPage === pub.landing && mounted === 'landing') return pub.scrollToSection(pub.LANDING[path]);   // already on the home page: just glide

@@ -28,7 +28,27 @@ class SmtpMailer:
 
 
 def get_mailer():
-    return SmtpMailer() if current_app.config["MAIL_MODE"] == "smtp" and current_app.config["SMTP_HOST"] else ConsoleMailer()
+    mode = current_app.config["MAIL_MODE"].strip().lower()
+    if mode == "console":
+        return ConsoleMailer()
+    if mode == "smtp":
+        return SmtpMailer()
+    raise RuntimeError("MAIL_MODE must be either 'console' or 'smtp'.")
+
+
+def validate_mail_config(config):
+    mode = str(config.get("MAIL_MODE", "console")).strip().lower()
+    if mode not in ("console", "smtp"):
+        raise RuntimeError("MAIL_MODE must be either 'console' or 'smtp'.")
+    if mode == "smtp":
+        missing = [name for name in ("SMTP_HOST", "MAIL_FROM", "FRONTEND_URL") if not str(config.get(name, "")).strip()]
+        if missing:
+            raise RuntimeError("SMTP mode requires: " + ", ".join(missing))
+        sender = str(config["MAIL_FROM"]).strip().lower()
+        if "@" not in sender or sender.endswith(".example"):
+            raise RuntimeError("MAIL_FROM must be a real sender address accepted by your email provider.")
+        if config.get("SMTP_USER") and not config.get("SMTP_PASSWORD"):
+            raise RuntimeError("SMTP_PASSWORD is required when SMTP_USER is set.")
 
 
 def is_console():
