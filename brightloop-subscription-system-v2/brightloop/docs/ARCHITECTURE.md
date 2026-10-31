@@ -9,7 +9,7 @@ Browser SPA ──HTTP/JSON──> routes (auth + validation entry) ──> serv
 | **S**ingle responsibility | Routes only translate HTTP; services hold one use-case area each; `domain/pricing.py` only does maths; `validators.py` only validates; `mailer.py` only sends mail. |
 | **O**pen/closed | New subscription action = add one function to `subscriptions.ACTIONS`. New mail transport = new class in `mailer.py`. New CRUD screen = one config object passed to `crud()` in the frontend. |
 | **L**iskov | `ConsoleMailer` and `SmtpMailer` are interchangeable behind `.send()`. Every `Repo` subclass honours the same get/list/insert/update/delete contract. |
-| **I**nterface segregation | Small, focused service modules and blueprints instead of one god-service; customers can only reach the three self-service actions (`pause`, `resume`, `close`). |
+| **I**nterface segregation | Small, focused service modules and blueprints instead of one god-service; customers can only reach the four plan-governed self-service actions (`pause`, `resume`, `renew`, `close`). |
 | **D**ependency inversion | Services depend on repository/mailer abstractions, not SQL strings or SMTP; pricing is pure so it is unit-tested without a database. |
 
 ## Key design decisions
